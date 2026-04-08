@@ -1,0 +1,104 @@
+---
+title: "GitLab CI"
+description: "Run Snif code review on merge requests using GitLab CI/CD pipelines."
+---
+
+Snif supports GitLab natively. It posts findings as inline merge request discussions and summary comments. Works with gitlab.com, self-hosted GitLab, and enterprise instances with LDAP/SSO authentication.
+
+## Prerequisites
+
+- A repository with a `.snif.json` configuration file at the root
+- `SNIF_API_KEY` and `GITLAB_TOKEN` configured as CI/CD variables (**Settings > CI/CD > Variables**)
+
+## Setup
+
+Add this job to your `.gitlab-ci.yml`:
+
+```yaml .gitlab-ci.yml
+snif-review:
+  stage: review
+  image: debian:bookworm-slim
+  variables:
+    SNIF_VERSION: "3.2.1"
+    SNIF_API_KEY: $SNIF_API_KEY
+    GITLAB_TOKEN: $GITLAB_TOKEN
+  before_script:
+    - apt-get update && apt-get install -y curl git xz-utils ca-certificates
+    - curl -sSLf "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64" -o /usr/local/bin/cosign && chmod +x /usr/local/bin/cosign
+    - curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz" -O
+    - curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256" -O
+    - curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256.sig" -O
+    - curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256.pem" -O
+    - cosign verify-blob snif-x86_64-unknown-linux-gnu.tar.xz.sha256
+        --signature snif-x86_64-unknown-linux-gnu.tar.xz.sha256.sig
+        --certificate snif-x86_64-unknown-linux-gnu.tar.xz.sha256.pem
+        --certificate-identity "https://github.com/AssahBismarkabah/Snif/.github/workflows/sign-release.yml@refs/heads/main"
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+    - sha256sum -c snif-x86_64-unknown-linux-gnu.tar.xz.sha256
+    - tar xJf snif-x86_64-unknown-linux-gnu.tar.xz
+    - mv snif-x86_64-unknown-linux-gnu/snif /usr/local/bin/snif
+  cache:
+    paths:
+      - .snif/
+  script:
+    - snif index --path .
+    - snif review --path .
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"  # Required
+```
+
+<Warning>
+  The `merge_request_event` pipeline rule is required. `CI_PROJECT_PATH` and `CI_MERGE_REQUEST_IID` are only available in merge request pipelines — without this rule, those variables are not set and `snif review` will fail.
+</Warning>
+
+## Auto-detected variables
+
+Snif reads the following variables from the GitLab CI environment automatically. You do not need to pass them explicitly:
+
+| Variable | Description |
+|----------|-------------|
+| `CI_PROJECT_PATH` | The project path in `namespace/project` format |
+| `CI_MERGE_REQUEST_IID` | The internal ID of the merge request |
+| `CI_API_V4_URL` | The GitLab API base URL (e.g., `https://gitlab.com/api/v4`) |
+
+If auto-detection does not work in your environment, pass the values explicitly:
+
+```yaml
+  script:
+    - snif index --path .
+    - snif review --path . --repo "$CI_PROJECT_PATH" --pr "$CI_MERGE_REQUEST_IID"
+```
+
+## Required CI/CD variables
+
+Set these in **Settings > CI/CD > Variables**:
+
+| Variable | Description |
+|----------|-------------|
+| `SNIF_API_KEY` | Your LLM provider API key. |
+| `GITLAB_TOKEN` | A project or personal access token with `api` scope. Used to post merge request comments. Alternatively, `CI_JOB_TOKEN` works if the project allows it, but it has limited permissions on some GitLab configurations. |
+
+## Caching
+
+The `cache` block persists the `.snif/` directory between pipeline runs. This stores the repository index built by `snif index`, avoiding a full re-index on every merge request.
+
+## Self-hosted GitLab
+
+For self-hosted instances (e.g., `https://git.example.com`), Snif reads the `CI_API_V4_URL` variable that GitLab CI provides automatically. No additional configuration is needed.
+
+For projects that want to be explicit, add the instance URL to `.snif.json`:
+
+```json .snif.json
+{
+  "platform": {
+    "provider": "gitlab",
+    "api_base": "https://git.example.com/api/v4"
+  }
+}
+```
+
+This works with any GitLab instance, including those with LDAP, SAML, or OAuth authentication.
+
+<Tip>
+  To give Snif its own display name and avatar on comments, see [Bot identity](/ci/bot-identity).
+</Tip>

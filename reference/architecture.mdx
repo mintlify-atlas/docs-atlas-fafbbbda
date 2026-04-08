@@ -1,0 +1,188 @@
+---
+title: 'Architecture'
+description: 'Layered modular monolith with ports and adapters. Single binary, explicit module boundaries. Not microservices, not multi-agent.'
+---
+
+Snif is a layered modular monolith with ports and adapters at the system boundary. The application core owns workflow orchestration, context assembly, prompt construction, output handling, and evaluation. External systems are accessed through thin integration layers.
+
+This is not a microservice architecture, event-driven pipeline, or multi-agent orchestration system. It is a single binary with explicit module boundaries.
+
+## System context
+
+Snif sits between four external systems:
+
+<CardGroup cols={2}>
+  <Card title="Repository platform" icon="code-pull-request">
+    GitLab or GitHub. Provides change metadata, diffs, and annotation APIs. Triggers `snif review` via CI or webhooks.
+  </Card>
+  <Card title="Repository filesystem" icon="folder">
+    Source files, review conventions, and related code. Read directly from disk during indexing and review.
+  </Card>
+  <Card title="LLM provider" icon="microchip">
+    Any OpenAI-compatible endpoint — AWS Bedrock, OpenAI, Azure, or self-hosted. Handles model execution for summaries, embeddings, and review.
+  </Card>
+  <Card title="CI pipeline" icon="gears">
+    Invokes `snif index`, `snif review`, or `snif eval` as pipeline steps.
+  </Card>
+</CardGroup>
+
+## Modules
+
+### Core pipeline
+
+| Crate | Responsibility |
+|-------|---------------|
+| `snif-config` | Loads `.snif.json`, merges environment variables, validates settings, and fails fast on missing or inconsistent configuration. |
+| `snif-cli` | Handles CLI entry points and argument parsing for all commands. |
+| `snif-types` | Defines the canonical internal data model shared across all crates. |
+
+### Repository index
+
+The index provides the structural and semantic context that makes review findings specific and grounded rather than generic.
+
+| Crate | Responsibility |
+|-------|---------------|
+| `snif-parser` | Uses tree-sitter grammars to parse source files into ASTs and extract imports, symbol definitions, symbol references, and exports. |
+| `snif-graph` | Builds and maintains the relationship graph: import edges, call sites, type references, and test-to-source links. |
+| `snif-cochange` | Analyzes git history to compute co-change correlations between files. |
+| `snif-summarizer` | Generates natural language summaries of functions, classes, files, and directories through the LLM execution layer. |
+| `snif-embeddings` | Computes vector embeddings of LLM summaries and stores them alongside structural data. |
+| `snif-store` | Manages the local SQLite database with vector extensions, handles incremental updates, and exposes query interfaces for the retrieval layer. |
+
+### Context assembly
+
+| Crate | Responsibility |
+|-------|---------------|
+| `snif-context` | Houses the builder, diff parser, retrieval, conventions loader, and budget modules. |
+
+The context assembly stage has five sub-components:
+
+- **builder** — assembles the final context package from all sources
+- **diff_parser** — parses unified diffs into changed files and hunks
+- **retrieval** — queries the repository index using structural, semantic, and keyword methods in parallel, then merges and ranks results
+- **conventions** — loads repository review conventions and policies from the working tree
+- **budget** — enforces token and file-count limits, selects from ranked candidates, and records what was omitted
+
+### Prompt and execution
+
+| Crate | Responsibility |
+|-------|---------------|
+| `snif-prompts` | Renders the system prompt, user prompt, and output schema. Contains product policy for what Snif looks for and how it structures its output. |
+| `snif-execution` | Calls the configured LLM provider through a provider-neutral HTTP interface. Contains no product policy — its only job is to call the model and return the raw response. |
+
+### Output processing
+
+| Crate | Responsibility |
+|-------|---------------|
+| `snif-output` | Houses the parser, filter, fingerprint, and publish sub-modules. |
+
+- **parser** — translates the raw model response into structured findings
+- **filter** — applies confidence, evidence, impact, and suppression rules, including feedback-learned suppressions from the team signal store
+- **fingerprint** — generates stable finding identity across reruns
+- **publish** — translates filtered findings into platform-neutral publication actions
+
+### Feedback learning
+
+| Crate | Responsibility |
+|-------|---------------|
+| `snif-feedback` | Houses the collector, store, and filter sub-modules. |
+
+- **collector** — captures developer reactions, comment resolutions, ignored findings, and human reviewer comments from the platform
+- **store** — persists feedback signals per team with vector embeddings of the associated findings
+- **filter** — uses similarity matching against the signal store to suppress findings resembling past-rejected output and boost findings resembling past-accepted output
+
+### Platform integration
+
+| Crate | Responsibility |
+|-------|---------------|
+| `snif-platform` | Defines provider-neutral interfaces for triggers, metadata, diffs, and annotations. Concrete adapters for GitHub and GitLab live here alongside the annotation lifecycle manager. |
+
+### Evaluation
+
+| Crate | Responsibility |
+|-------|---------------|
+| `snif-eval` | Runs benchmark fixtures through the same pipeline used by `snif review`, computes precision, recall, and noise rate, and fails if quality gates are not met. |
+
+## Runtime flow
+
+### `snif index`
+
+The indexer analyzes the repository in two passes.
+
+**Pass 1 — structural:**
+
+1. tree-sitter parses every source file into an AST
+2. The parser extracts imports, symbol definitions, symbol references, and exports
+3. The graph builder assembles these into a relationship graph: import edges, call sites, type references, and test-to-source links
+4. The co-change analyzer reads git history and computes file-pair correlation scores
+
+**Pass 2 — semantic:**
+
+1. The summarizer walks the graph bottom-up: functions first, then classes, then files, then directories
+2. Each summary is generated by the LLM through the same execution layer used by `snif review`
+3. The embeddings module computes vector embeddings of those summaries
+4. Everything is written to the SQLite vector store
+
+The index is incremental. On subsequent runs, only files changed since the last indexed commit are reprocessed. Summaries and embeddings are regenerated only for code units that changed or whose dependencies changed.
+
+### `snif review`
+
+```
+load config
+  → select platform adapter → fetch change metadata + diff
+  → load conventions
+  → load changed file contents
+  → retrieve related context (structural + semantic + keyword, in parallel)
+  → merge + rank + deduplicate results
+  → budget: select ranked candidates until token limit
+  → render system prompt + user prompt + output schema
+  → call LLM provider
+  → parse response → structured findings
+  → static filter (confidence, evidence, impact, suppression rules)
+  → feedback filter (similarity against team signal store)
+  → compute fingerprints
+  → generate publication actions
+  → platform annotation adapter: post new findings, resolve stale ones
+  → record run metadata
+```
+
+The three retrieval methods run in parallel:
+
+- **Structural** — queries the relationship graph for direct imports, consumers, test files, co-change correlates, and symbol references. Deterministic.
+- **Semantic** — searches the vector store for code units with similar summaries to the changed code. Finds code related by purpose rather than import path.
+- **Keyword** — searches for exact identifiers, type names, and error strings referenced in the diff. Fast fallback for languages without full tree-sitter support.
+
+Results are merged, deduplicated, and scored. Structural matches rank highest, semantic next, keyword last.
+
+### `snif eval`
+
+```
+load benchmark fixture set
+  → for each fixture: run full snif review pipeline
+  → compare actual findings with expected findings or expected silence
+  → compute precision, recall, noise rate
+  → apply quality gates → fail if gates not met
+```
+
+## Security
+
+- Credentials come from environment variables only — never from `.snif.json` or other committed configuration.
+- Logs avoid leaking source content.
+- Only the minimum required context is transmitted to the model provider.
+- LLM-generated summaries stored in the index describe code behavior in natural language without containing raw source code. They still reflect the repository's logic and should be treated with the same access controls as the source itself.
+
+## Observability
+
+Every review run captures:
+
+- **Timing** — total duration and per-stage breakdown
+- **Token usage** — prompt tokens, completion tokens, total
+- **Context size** — files included, files omitted, token counts per layer
+- **Truncation decisions** — which files were dropped and why
+- **Retrieval breakdown** — how many files came from structural, semantic, and keyword retrieval
+- **Finding counts** — before and after each filter stage
+- **Feedback filter actions** — suppressed and boosted finding counts
+- **Comment actions** — findings posted and stale findings resolved
+- **Evaluation metrics** — precision, recall, and noise rate per fixture and in aggregate (when running `snif eval`)
+
+This makes it possible to answer three questions: why did Snif say this, why did Snif stay quiet, and what did Snif learn from this team's feedback.

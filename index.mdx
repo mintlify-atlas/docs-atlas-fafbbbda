@@ -1,97 +1,63 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Snif — Context-Aware AI Code Review"
+description: "Snif indexes your repository structure, understands your codebase, and posts specific, evidenced review findings directly on your pull requests."
 ---
 
-## Setting up
+Snif is an AI code review agent built for large repositories. It doesn't just read the diff — it builds a full structural and semantic map of your codebase, so every finding it posts is grounded in real context from your code.
 
-Get your documentation site up and running in minutes.
+It ships as a single Rust binary. Drop it into any CI pipeline, point it at your repository, and get actionable review comments on every pull request.
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get Snif running against your repository in under 10 minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="CI Integration" icon="github" href="/ci/github-actions">
+    Add Snif to GitHub Actions, GitLab CI, or any generic pipeline
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Configuration" icon="sliders" href="/configuration/overview">
+    Configure your LLM provider, indexing behavior, and review filters
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="CLI Reference" icon="terminal" href="/reference/snif-index">
+    Full reference for all Snif commands and flags
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How Snif works
 
-Everything you need to create world-class documentation.
+Most code review tools look only at the diff. Snif builds three kinds of context before making a single review call.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+<Steps>
+  <Step title="Index your repository">
+    Run `snif index` to parse every source file with tree-sitter, build a structural relationship graph, generate LLM summaries, and store vector embeddings — all in a local SQLite database. Subsequent runs are incremental.
+  </Step>
+  <Step title="Retrieve related context">
+    When a pull request opens, Snif retrieves related code using three methods in parallel: structural graph traversal (imports, consumers, tests), semantic vector search (similar code elsewhere in the repo), and keyword matching (exact identifier references).
+  </Step>
+  <Step title="Review with full context">
+    The assembled context — diff, changed files, related files, and repository conventions — is sent to your configured LLM. The model reviews with full awareness of how the changed code connects to the rest of the repository.
+  </Step>
+  <Step title="Filter and publish findings">
+    Findings go through aggressive static filtering (confidence, evidence, impact) and an adaptive feedback filter that learns from your team's reactions over time. Survivors are posted as inline PR comments.
+  </Step>
+</Steps>
 
-## Need inspiration?
+## Key capabilities
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<CardGroup cols={2}>
+  <Card title="Structural + semantic retrieval" icon="diagram-project" href="/concepts/context-retrieval">
+    Combines import graph traversal, vector similarity search, and keyword matching to assemble the most relevant context for every review
+  </Card>
+  <Card title="Feedback learning" icon="brain" href="/concepts/feedback-learning">
+    Adapts to your team's preferences — suppresses findings that resemble past rejections, boosts findings that resemble past approvals
+  </Card>
+  <Card title="Provider-agnostic LLM" icon="robot" href="/configuration/providers">
+    Works with OpenAI, AWS Bedrock, Azure OpenAI, or any OpenAI-compatible self-hosted endpoint
+  </Card>
+  <Card title="Evaluation harness" icon="flask" href="/testing/evaluation-harness">
+    Built-in benchmarking with precision, recall, and noise-rate quality gates
+  </Card>
+</CardGroup>
+
+<Note>
+  Snif requires a Rust toolchain (1.70+) to build from source, or download a pre-built binary from [GitHub Releases](https://github.com/AssahBismarkabah/Snif/releases/latest). An OpenAI-compatible LLM provider endpoint and API key are required for indexing and review.
+</Note>

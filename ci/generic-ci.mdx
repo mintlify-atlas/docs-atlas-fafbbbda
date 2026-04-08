@@ -1,0 +1,75 @@
+---
+title: "Generic CI (Jenkins, CircleCI, etc.)"
+description: "Integrate Snif with any CI system by passing a diff file directly."
+---
+
+For CI systems without a native Snif adapter, you can generate a diff from git and pass it directly to Snif. Snif runs the full review pipeline and outputs findings as JSON to stdout.
+
+## How it works
+
+Instead of reading pull request metadata from the CI environment, Snif accepts a patch file via `--diff-file`. This works with any CI system that can run shell commands and access a git repository.
+
+## Steps
+
+<Steps>
+  <Step title="Download the Snif binary">
+    Download the binary for your platform from the [GitHub releases page](https://github.com/AssahBismarkabah/Snif/releases) and place it on your `PATH`.
+
+    ```bash
+    curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v3.2.1/snif-x86_64-unknown-linux-gnu.tar.xz" -O
+    tar xJf snif-x86_64-unknown-linux-gnu.tar.xz
+    mv snif-x86_64-unknown-linux-gnu/snif /usr/local/bin/snif
+    ```
+  </Step>
+
+  <Step title="Set SNIF_API_KEY">
+    Export your LLM provider API key as an environment variable. In most CI systems, you store this as a secret or credential and inject it into the build environment.
+
+    ```bash
+    export SNIF_API_KEY="your-api-key"
+    ```
+  </Step>
+
+  <Step title="Index the repository">
+    Build the repository index. This step analyzes the codebase to provide context for the review.
+
+    ```bash
+    snif index --path .
+    ```
+  </Step>
+
+  <Step title="Generate a diff">
+    Generate a patch file from git that represents the changes to review.
+
+    ```bash
+    git diff origin/main..HEAD > change.patch
+    ```
+  </Step>
+
+  <Step title="Run the review">
+    Pass the patch file to `snif review` using `--diff-file`.
+
+    ```bash
+    snif review --path . --diff-file change.patch
+    ```
+  </Step>
+</Steps>
+
+## Output
+
+Findings are printed to stdout as JSON. Parse this output in your CI pipeline to fail the build, post comments via your CI system's API, or store results as build artifacts.
+
+```json
+[
+  {
+    "file": "src/main.rs",
+    "line": 42,
+    "severity": "warning",
+    "message": "..."
+  }
+]
+```
+
+<Note>
+  In generic CI mode, Snif does not post comments automatically. You are responsible for handling the JSON output — for example, by posting findings to your code review tool's API or printing them to the build log.
+</Note>

@@ -1,0 +1,78 @@
+---
+title: "Output filtering"
+description: "How Snif's two-stage filter reduces noise while preserving specific, evidenced findings your team will act on."
+---
+
+The model returns findings for everything it considers potentially relevant. Not all of them are worth posting. Output filtering is the step that separates signal from noise before any findings reach the pull request.
+
+Snif applies two stages in sequence: a static filter that enforces a universal quality floor, then a feedback filter that applies team-specific adjustments based on learned preferences.
+
+## Stage 1: Static filter
+
+The static filter rejects findings that fail any of the following checks:
+
+<AccordionGroup>
+  <Accordion title="Speculation check">
+    Findings that describe what might happen under unspecified conditions — without evidence from the provided context — are rejected. The finding must be grounded in the actual code present in the context package.
+  </Accordion>
+  <Accordion title="Style and convention check">
+    Findings with category `style` or `convention` are rejected when `suppress_style_only` is `true` (the default). Code that is stylistically unconventional but functionally correct does not warrant a comment unless the team has explicitly disabled this suppression.
+  </Accordion>
+  <Accordion title="Evidence check">
+    Findings must cite evidence from the context provided to the model. A finding that makes a claim without referencing the relevant code, import, or prior finding is rejected.
+  </Accordion>
+  <Accordion title="Impact check">
+    Findings must carry user-relevant impact — correctness, reliability, security, performance, or an explicitly configured policy concern. Observations without a clear consequence are rejected.
+  </Accordion>
+  <Accordion title="Duplicate check">
+    When multiple findings address the same issue, only the strongest one is kept. Weaker findings covering the same location or concern are rejected.
+  </Accordion>
+</AccordionGroup>
+
+The static filter biases toward false negatives over false positives. It is better for Snif to stay quiet than to post a finding that wastes a developer's attention.
+
+## Stage 2: Feedback filter
+
+The feedback filter runs after the static filter, against the findings that survived. It checks each finding against the team's accumulated signal store using vector similarity matching.
+
+- Findings that closely resemble **past-rejected findings** (3 or more similar dismissed signals within distance 0.3) are suppressed.
+- Findings that closely resemble **past-accepted findings** (3 or more similar accepted signals within distance 0.3) have their confidence score boosted by 0.1.
+- Findings that fall below `min_confidence` after adjustment are suppressed.
+
+The feedback filter does not activate until the team has accumulated at least `feedback_min_signals` signals. Below that threshold, the static filter carries the full load.
+
+See [Feedback learning](/concepts/feedback-learning) for more detail on how the signal store is built.
+
+## Configuration
+
+The filter behavior is configured in `.snif.json` under the `filter` key:
+
+```json
+{
+  "filter": {
+    "min_confidence": 0.7,
+    "suppress_style_only": true,
+    "feedback_min_signals": 20
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `min_confidence` | `0.7` | Findings below this score are suppressed after all adjustments. |
+| `suppress_style_only` | `true` | Reject style-only findings unless the rule is declared as enforced policy. |
+| `feedback_min_signals` | `20` | Minimum signals the team must have before the feedback filter activates. |
+
+## Annotation lifecycle
+
+The filter interacts with the annotation system in two ways that keep review comments well-behaved over time.
+
+**Idempotent reruns.** Reruns against the same change version produce the same findings. Finding fingerprints are stable across pushes, so the system matches current findings with prior bot output and avoids duplicate comments.
+
+**Stale finding resolution.** When the underlying issue disappears — because the developer fixed it, or because the change was updated — the corresponding bot comment is resolved automatically. Snif does not leave stale findings open.
+
+**Human discussion preservation.** Ongoing human discussions on the same change are detected and preserved. Snif resolves its own stale findings without touching human reviewer threads.
+
+<Warning>
+  Setting `min_confidence` below `0.5` significantly increases noise. The default of `0.7` is calibrated to the static filter's evidence and impact requirements. Lower it only if you have reviewed run metadata and found that useful findings are being suppressed.
+</Warning>

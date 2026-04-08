@@ -1,0 +1,85 @@
+---
+title: '`snif eval`'
+description: 'Run the evaluation harness against benchmark fixtures to measure review quality and validate that precision and noise rate meet configured thresholds.'
+---
+
+The `snif eval` command runs Snif's review pipeline against a directory of JSON fixture files and reports precision, recall, and noise rate. It exits with a non-zero status if quality gates fail, making it suitable for use in CI pipelines that gate on review quality.
+
+## Usage
+
+```bash
+snif eval --fixtures <PATH> [--path <PATH>]
+```
+
+## Flags
+
+<ParamField path="--fixtures" type="string" required>
+  Path to the directory containing JSON fixture files. Each fixture describes a code change and the expected findings. This flag is required.
+</ParamField>
+
+<ParamField path="--path" type="string" default=".">
+  Path to the repository root. Used to load `.snif.json` configuration. Defaults to the current directory.
+</ParamField>
+
+## Quality gates
+
+The command exits with code `0` if both gates pass, or code `1` if either fails:
+
+| Gate | Threshold |
+|------|-----------|
+| Precision | >= 70% |
+| Noise rate | &lt;= 20% |
+
+<Note>
+  The `eval_fixtures_path` field in `.snif.json` can store a default fixtures path, but `--fixtures` always takes precedence when provided on the command line.
+</Note>
+
+## Output
+
+Results are printed to stdout in a table format, one row per fixture, followed by aggregate metrics:
+
+```
+=== Evaluation Results ===
+
+  my-fixture                     expected=3 actual=4 TP=3 FP=1 FN=0
+  another-fixture                expected=2 actual=2 TP=2 FP=0 FN=0
+
+  Precision:   85.7%
+  Recall:      100.0%
+  Noise rate:  12.5%
+
+  Quality gates: PASSED
+```
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Quality gates passed. |
+| `1` | One or more quality gates failed. |
+
+## Examples
+
+**Run the evaluation harness:**
+
+```bash
+snif eval --fixtures ./eval/fixtures
+```
+
+**Run with verbose logging to trace individual review steps:**
+
+```bash
+RUST_LOG=info snif eval --fixtures ./eval/fixtures
+```
+
+**Use a config from a different repository root:**
+
+```bash
+snif eval --fixtures ./eval/fixtures --path /path/to/repo
+```
+
+## Notes
+
+- `snif eval` calls the full review pipeline internally, including LLM inference. The `SNIF_API_KEY` (or `OPENAI_API_KEY`) environment variable must be set.
+- Fixture files are JSON documents in the directory specified by `--fixtures`. See the project's `eval/` directory for example fixture format.
+- Evaluation results reflect the current `.snif.json` configuration, so changing filter thresholds or model settings will affect scores.

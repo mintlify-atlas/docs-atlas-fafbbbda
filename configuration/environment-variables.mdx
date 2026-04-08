@@ -1,0 +1,86 @@
+---
+title: "Environment variables"
+description: "Secrets and deployment-specific settings are passed to Snif via environment variables. Environment variables override the corresponding .snif.json fields where applicable."
+---
+
+Never put secrets in `.snif.json`. Use environment variables for API keys, tokens, and any values that differ between environments.
+
+## API and endpoint
+
+<ParamField body="SNIF_API_KEY" type="string">
+  API key for the configured LLM provider. Snif checks this variable first, then falls back to `OPENAI_API_KEY`. Required for `snif index` (summarization) and `snif review`.
+</ParamField>
+
+<ParamField body="OPENAI_API_KEY" type="string">
+  Fallback API key used when `SNIF_API_KEY` is not set. Standard OpenAI SDK variable — useful if you already have it set in your environment.
+</ParamField>
+
+<ParamField body="SNIF_ENDPOINT" type="string">
+  Overrides `model.endpoint` from `.snif.json`. Useful in CI environments where the endpoint varies between deployments without changing the committed config file.
+</ParamField>
+
+## Storage
+
+<ParamField body="SNIF_DB_PATH" type="string">
+  Overrides `index.db_path` from `.snif.json`. Sets the path to the SQLite index database. Useful when you want the index stored outside the repository directory.
+</ParamField>
+
+## GitHub
+
+<ParamField body="GITHUB_TOKEN" type="string">
+  GitHub personal access token or GitHub App token. Required when using the GitHub adapter (`--repo` and `--pr` flags). Needs read access to pull requests and write access to post review comments.
+</ParamField>
+
+<ParamField body="GITHUB_REPOSITORY" type="string">
+  Repository identifier in `owner/repo` format. Used by the GitHub adapter when running in CI. **Automatically set by GitHub Actions** — you do not need to set this manually in GitHub Actions workflows.
+</ParamField>
+
+<ParamField body="SNIF_PR_NUMBER" type="string">
+  Pull request number. Used by the GitHub adapter in CI. Takes priority over `GITHUB_PR_NUMBER`.
+</ParamField>
+
+<ParamField body="GITHUB_PR_NUMBER" type="string">
+  Pull request number. Fallback used when `SNIF_PR_NUMBER` is not set.
+</ParamField>
+
+## GitLab
+
+<ParamField body="GITLAB_TOKEN" type="string">
+  GitLab personal or project access token with `api` scope. Required for posting merge request comments. Falls back to `CI_JOB_TOKEN` in GitLab CI if not set.
+</ParamField>
+
+<ParamField body="CI_PROJECT_PATH" type="string">
+  Project identifier in `group/project` format. Used for auto-detecting the GitLab platform and as the project identifier. **Automatically set by GitLab CI** — you do not need to set this manually in GitLab CI pipelines.
+</ParamField>
+
+<ParamField body="CI_MERGE_REQUEST_IID" type="string">
+  Merge request IID (internal ID). Used as the merge request identifier when posting comments. **Automatically set by GitLab CI** in merge request pipelines.
+</ParamField>
+
+<ParamField body="CI_API_V4_URL" type="string">
+  GitLab API base URL. Points to the instance's API base (e.g., `https://gitlab.com/api/v4` or `https://git.example.com/api/v4`). Used for self-hosted GitLab support. **Automatically set by GitLab CI**.
+</ParamField>
+
+## Platform override
+
+<ParamField body="SNIF_PLATFORM" type="string">
+  Overrides platform auto-detection. Set to `github` or `gitlab`. Use this when auto-detection from environment variables is not reliable in your CI setup.
+</ParamField>
+
+## Summary
+
+| Variable | Required | Auto-set by CI | Description |
+|---|---|---|---|
+| `SNIF_API_KEY` | Yes (or `OPENAI_API_KEY`) | No | LLM provider API key |
+| `OPENAI_API_KEY` | Fallback | No | LLM provider API key fallback |
+| `SNIF_ENDPOINT` | No | No | Overrides `model.endpoint` |
+| `SNIF_DB_PATH` | No | No | Overrides `index.db_path` |
+| `GITHUB_TOKEN` | For GitHub reviews | No | GitHub API token |
+| `GITHUB_REPOSITORY` | For GitHub CI | GitHub Actions | Repository in `owner/repo` format |
+| `SNIF_PR_NUMBER` | For GitHub CI | No | Pull request number |
+| `GITHUB_PR_NUMBER` | For GitHub CI (fallback) | No | Pull request number fallback |
+| `SNIF_PLATFORM` | No | No | Overrides platform auto-detection |
+| `GITLAB_TOKEN` | For GitLab reviews | No | GitLab API token |
+| `CI_PROJECT_PATH` | For GitLab CI | GitLab CI | Project in `group/project` format |
+| `CI_MERGE_REQUEST_IID` | For GitLab CI | GitLab CI | Merge request IID |
+| `CI_API_V4_URL` | For self-hosted GitLab | GitLab CI | GitLab API base URL |

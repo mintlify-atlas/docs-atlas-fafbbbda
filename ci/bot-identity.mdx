@@ -1,0 +1,89 @@
+---
+title: "Bot identity"
+description: "Control which user or app Snif uses to post review comments on GitHub and GitLab."
+---
+
+Snif runs in your CI pipeline and posts review comments using the credentials you provide. The identity that appears on comments depends on the token you configure.
+
+## GitHub
+
+<Tabs>
+  <Tab title="Default (no setup needed)">
+
+With `GITHUB_TOKEN` (provided automatically by GitHub Actions), Snif posts comments as **github-actions**. This works out of the box — `SNIF_API_KEY` is the only secret you need to add.
+
+No additional configuration is required.
+
+  </Tab>
+  <Tab title="Custom identity (GitHub App)">
+
+To give Snif its own name and avatar on your repositories, create a GitHub App for your organization.
+
+<Steps>
+  <Step title="Create a GitHub App">
+    Go to **github.com/settings/apps** and click **New GitHub App**. Set a name and upload an avatar for the bot.
+  </Step>
+
+  <Step title="Configure permissions">
+    Set the following repository permissions on the app:
+
+    | Permission | Access |
+    |------------|--------|
+    | Pull requests | Read & Write |
+    | Contents | Read |
+    | Issues | Write |
+  </Step>
+
+  <Step title="Generate a private key and install the app">
+    Generate a private key from the app settings page. Install the app on the repositories where Snif will run.
+  </Step>
+
+  <Step title="Add secrets to your repository">
+    Add the following secrets in **Settings > Secrets and variables > Actions**:
+
+    | Secret | Value |
+    |--------|-------|
+    | `SNIF_APP_ID` | The numeric app ID shown on the app settings page |
+    | `SNIF_APP_PRIVATE_KEY` | The full contents of the `.pem` private key file |
+    | `SNIF_APP_INSTALLATION_ID` | The numeric installation ID for your organization or user |
+  </Step>
+</Steps>
+
+When these secrets are present, Snif authenticates as the app automatically. When they are not present, Snif falls back to `GITHUB_TOKEN`.
+
+<Note>
+  Each organization or user creates their own GitHub App. App credentials are specific to the installation and cannot be shared across organizations.
+</Note>
+
+  </Tab>
+</Tabs>
+
+## GitLab
+
+GitLab does not have an app installation model. Comments are posted as the user who owns the access token.
+
+To give Snif its own identity on GitLab:
+
+<Steps>
+  <Step title="Create a dedicated GitLab user">
+    Create a new GitLab user account (e.g., `snif-bot`). Set a display name and upload an avatar for the account.
+  </Step>
+
+  <Step title="Grant access to projects">
+    Give the account **Developer** access to the projects Snif will review.
+  </Step>
+
+  <Step title="Generate a personal access token">
+    Log in as the bot account and generate a personal access token with `api` scope.
+  </Step>
+
+  <Step title="Configure the CI/CD variable">
+    Use that token as `GITLAB_TOKEN` in the project's CI/CD variables (**Settings > CI/CD > Variables**).
+  </Step>
+</Steps>
+
+All review comments and discussion threads will appear as posted by the bot account.
+
+<Note>
+  On self-hosted enterprise instances, a GitLab admin can create a service account specifically for this purpose. The adapter works with any valid token regardless of how the account authenticates — local, LDAP, SAML, or OAuth.
+</Note>

@@ -1,0 +1,77 @@
+---
+title: "Feedback learning"
+description: "How Snif adapts to your team's preferences over time by learning from developer reactions to its findings."
+---
+
+Static filtering rules — confidence thresholds, evidence requirements, impact checks — establish a universal quality floor. But every engineering team has its own standards, conventions, and tolerance for certain kinds of feedback. One team flags every missing error log as a concern; another considers it style. Static rules cannot learn the difference.
+
+The feedback learning system closes that gap by observing what each team actually accepts and rejects, then using that history to tune future output.
+
+## How signals are collected
+
+When Snif posts a finding as an inline comment, the platform adapter tracks what happens to it. Developer reactions are captured as one of three signal types:
+
+| Signal type | When it's recorded |
+|-------------|-------------------|
+| `accepted` | Developer gives a thumbs-up or resolves the comment after fixing the issue |
+| `dismissed` | Developer explicitly dismisses or disagrees with the finding |
+| `ignored` | Finding is left unresolved without any reaction |
+
+These signals are collected by `feedback::collector` and stored per team in the feedback database.
+
+## What's stored
+
+The feedback store is a separate SQLite database from the repository index, stored in the `.snif/` directory. Each signal record contains:
+
+- **Finding text** — the full text of the finding that generated the signal
+- **Vector embedding** — a 384-dimension float representation of the finding text, used for similarity matching
+- **Team ID** — scopes the signal to the team that produced it
+- **Signal type** — `accepted`, `dismissed`, or `ignored`
+- **Timestamp** — when the signal was recorded
+
+## Per-team scoping
+
+The feedback store is scoped by team ID. Different teams working on the same repository can accumulate separate learned preferences. A platform team and a product team committing to the same monorepo will develop independent filters based on their own review histories.
+
+## Cold start
+
+A new team starts with no feedback data. The static filter carries the full filtering load until enough signals accumulate to be statistically meaningful.
+
+The feedback filter does not activate until the team's signal count reaches the `feedback_min_signals` threshold (default: 20). This prevents a small number of early reactions from poisoning the learned preferences before the system has enough signal to be reliable.
+
+```json
+{
+  "filter": {
+    "feedback_min_signals": 20
+  }
+}
+```
+
+## How it adapts
+
+Once the threshold is reached, every new finding is evaluated against the team's signal history:
+
+<Steps>
+  <Step title="Embed the finding">
+    The finding text is converted to a vector embedding using the same embedding model used during indexing.
+  </Step>
+  <Step title="Search the signal store">
+    The top 10 most similar past signals are retrieved using KNN vector search, filtered to the current team.
+  </Step>
+  <Step title="Count nearby signals by type">
+    Signals within a distance threshold of 0.3 are counted by type. Only close matches affect the decision.
+  </Step>
+  <Step title="Apply the adjustment">
+    - If 3 or more nearby signals are `dismissed`, the finding is suppressed entirely.
+    - If 3 or more nearby signals are `accepted`, the finding's confidence score is boosted by 0.1 (capped at 1.0).
+    - Findings that drop below `min_confidence` after adjustment are suppressed.
+  </Step>
+</Steps>
+
+## What the model does not do
+
+The model itself does not change. Snif does not perform prompt tuning, fine-tuning, or any modification to the underlying LLM weights. The feedback filter is a post-generation layer that learns what to let through based on observed team behavior. The generation pipeline is unaffected.
+
+<Note>
+  Feedback learning is purely additive to the static filter. The static filter runs first and sets the quality floor. The feedback filter then applies team-specific adjustments to the findings that passed static filtering.
+</Note>

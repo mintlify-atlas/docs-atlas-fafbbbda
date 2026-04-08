@@ -1,0 +1,192 @@
+---
+title: "Evaluation harness"
+description: "Benchmark Snif's review quality against known-good fixtures. The harness measures precision, recall, and noise rate, and enforces quality gates."
+---
+
+## Overview
+
+The evaluation harness runs a set of fixture files through the full review pipeline and compares actual findings against expected findings. It computes aggregate metrics and exits with a non-zero status code if quality gates are not met.
+
+```bash
+RUST_LOG=info cargo run -- eval --fixtures ./fixtures/
+```
+
+## Fixture format
+
+Each fixture lives in its own subdirectory and consists of three parts:
+
+| File | Description |
+|---|---|
+| `fixture.json` | Metadata, expected findings, and optional conventions |
+| `change.patch` | The diff to review (unified diff format) |
+| `src/` | Source files referenced by the diff |
+
+### fixture.json schema
+
+```json
+{
+  "name": "missing-null-check",
+  "description": "Function dereferences nullable pointer without check",
+  "conventions": null,
+  "expected_findings": [
+    {
+      "file": "src/handler.rs",
+      "start_line": 42,
+      "category": "logic"
+    }
+  ]
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Unique fixture identifier |
+| `description` | string | Human-readable summary of the change |
+| `conventions` | string \| null | Optional project conventions passed to the reviewer |
+| `expected_findings` | array | List of findings the reviewer should produce |
+
+**Expected finding fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `file` | string | Path to the file containing the issue |
+| `start_line` | number | Line number where the issue occurs |
+| `category` | string | Issue category (e.g., `logic`, `security`) |
+
+<Note>
+  A finding matches if the file path is identical and the reported line is within 5 lines of `start_line`.
+</Note>
+
+### Clean change fixtures
+
+Set `expected_findings` to an empty array for changes that should produce no findings:
+
+```json
+{
+  "name": "clean-refactor",
+  "description": "A clean refactoring that extracts a helper function. No issues should be found.",
+  "conventions": null,
+  "expected_findings": []
+}
+```
+
+This also applies to style-noise changes — changes that contain only cosmetic or stylistic differences that the reviewer must not flag.
+
+## Complete fixture example
+
+The following fixture tests that Snif catches an `unwrap()` call on an `Option` that may be `None`:
+
+**`fixtures/01-unwrap-without-check/fixture.json`**
+
+```json
+{
+  "name": "unwrap-without-check",
+  "description": "Function calls unwrap() on an Option parameter without checking, causing a panic if None is passed",
+  "conventions": null,
+  "expected_findings": [
+    {
+      "file": "src/handler.rs",
+      "start_line": 9,
+      "category": "logic"
+    }
+  ]
+}
+```
+
+**`fixtures/01-unwrap-without-check/change.patch`**
+
+```diff
+--- a/src/handler.rs
++++ b/src/handler.rs
+@@ -10,6 +10,12 @@ use std::collections::HashMap;
+
+ pub struct Config {
+     pub settings: HashMap<String, String>,
++    pub database_url: Option<String>,
++}
++
++pub fn connect_to_database(config: &Config) -> String {
++    let url = config.database_url.unwrap();
++    format!("Connecting to {}", url)
+ }
+
+ pub fn get_setting(config: &Config, key: &str) -> Option<&String> {
+```
+
+The source file for this fixture lives at `fixtures/01-unwrap-without-check/src/handler.rs`.
+
+## Quality gates
+
+The harness exits with code `0` if gates pass and code `1` if they fail.
+
+<CardGroup cols={2}>
+  <Card title="Minimum thresholds" icon="shield">
+    - Precision &ge; 70%
+    - Noise rate &le; 20%
+  </Card>
+  <Card title="Phase 1 targets" icon="chart-line">
+    - Precision &ge; 80%
+    - Recall &ge; 60%
+    - Noise rate &le; 10%
+  </Card>
+</CardGroup>
+
+**Metric definitions:**
+
+| Metric | Definition |
+|---|---|
+| Precision | Fraction of reported findings that match an expected finding |
+| Recall | Fraction of expected findings that were reported |
+| Noise rate | Fraction of reported findings that are false positives |
+
+## Creating fixtures
+
+<Steps>
+
+<Step title="Start with 3–5 fixtures">
+
+Cover these three cases first:
+
+1. A change with a known bug (e.g., off-by-one error, missing error handling)
+2. A clean change with no issues
+3. A change with style noise that must not be flagged
+
+</Step>
+
+<Step title="Extract from real history">
+
+Use `git log` and `git show` to pull diffs and file content from your repository's actual history. Real examples produce more reliable benchmarks than synthetic ones.
+
+```bash
+# Get a diff for a specific commit
+git show <commit-sha> > fixtures/my-fixture/change.patch
+
+# Export the relevant source file at that commit
+git show <commit-sha>:src/handler.rs > fixtures/my-fixture/src/handler.rs
+```
+
+</Step>
+
+<Step title="Write expected_findings">
+
+Expected findings must be concrete and verifiable — not hypothetical or style-related issues. Include the exact file path, the line number where the issue appears in the patched file, and the appropriate category.
+
+</Step>
+
+<Step title="Run the harness and iterate">
+
+```bash
+RUST_LOG=info cargo run -- eval --fixtures ./fixtures/
+```
+
+Review the per-fixture output in the logs to see where the reviewer missed expected findings or produced false positives. Adjust prompts in `crates/snif-prompts/src/lib.rs` and re-run.
+
+</Step>
+
+</Steps>
+
+<Tip>
+  Expand the fixture set incrementally as you observe reviewer behavior in production. Real-world false positives and missed bugs make the best new fixtures.
+</Tip>

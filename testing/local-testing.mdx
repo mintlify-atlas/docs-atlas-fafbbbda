@@ -1,0 +1,148 @@
+---
+title: "Local testing"
+description: "Run the full Snif review pipeline on your machine without GitHub API access. Diffs are read from a local file and findings are printed to stdout."
+---
+
+<Info>
+  **Prerequisites**: Rust toolchain installed and the repository cloned. No GitHub API access is required for local testing.
+</Info>
+
+## Overview
+
+Local testing lets you exercise the full review pipeline — indexing, context retrieval, and LLM-based analysis — against any repository on your machine. You provide the diff as a file; findings come back as JSON on stdout.
+
+<Steps>
+
+<Step title="Build the binary">
+
+```bash
+cargo build
+```
+
+</Step>
+
+<Step title="Create .snif.json">
+
+Place a `.snif.json` file at the root of the repository you want to test. At minimum, configure the LLM provider:
+
+```json
+{
+  "model": {
+    "review_model": "your-review-model",
+    "summary_model": "your-summary-model",
+    "endpoint": "https://your-provider.com/v1"
+  }
+}
+```
+
+</Step>
+
+<Step title="Set your API key">
+
+```bash
+export SNIF_API_KEY=your-api-key
+```
+
+<Note>
+  If no API key is set, the structural index is built but LLM summaries and embeddings are skipped. The `review` command still works with reduced context quality.
+</Note>
+
+</Step>
+
+<Step title="Index the repository">
+
+Build the repository index. This parses all source files, builds the structural graph, generates LLM summaries, and computes vector embeddings.
+
+```bash
+RUST_LOG=info cargo run -- index --path /path/to/repo
+```
+
+On the first run, use `--full` to build a clean index from scratch:
+
+```bash
+RUST_LOG=info cargo run -- index --path /path/to/repo --full
+```
+
+The index is stored at `.snif/index.db` relative to the repository root.
+
+</Step>
+
+<Step title="Generate a test diff">
+
+Create a diff from a recent commit:
+
+```bash
+cd /path/to/repo
+git diff HEAD~1 > /tmp/test.diff
+```
+
+Or diff between branches:
+
+```bash
+git diff main..feature-branch > /tmp/test.diff
+```
+
+</Step>
+
+<Step title="Run the review">
+
+```bash
+RUST_LOG=info cargo run -- review --path /path/to/repo --diff-file /tmp/test.diff
+```
+
+Findings are printed to stdout as a JSON array. Each finding includes:
+
+| Field | Description |
+|---|---|
+| `file` | Path to the file containing the issue |
+| `start_line` / `end_line` | Line range of the finding |
+| `category` | Issue category (e.g., `logic`, `security`) |
+| `confidence` | Confidence score from 0–1 |
+| `evidence` | Specific code excerpt supporting the finding |
+| `explanation` | Human-readable description of the problem |
+| `impact` | Severity and potential consequences |
+| `suggestion` | Optional fix recommendation |
+
+If no issues are found, the output is an empty JSON array and the log shows:
+
+```
+No findings — change looks clean
+```
+
+</Step>
+
+</Steps>
+
+## Inspecting the index
+
+You can query the index database directly with `sqlite3`:
+
+```bash
+sqlite3 .snif/index.db "SELECT COUNT(*) FROM files;"
+sqlite3 .snif/index.db "SELECT COUNT(*) FROM symbols;"
+sqlite3 .snif/index.db "SELECT COUNT(*) FROM summaries;"
+sqlite3 .snif/index.db "SELECT summary FROM summaries LIMIT 3;"
+```
+
+This is useful for verifying that indexing completed correctly and that summaries were generated.
+
+## Iterating on prompts
+
+To tune review behavior, modify the prompts in `crates/snif-prompts/src/lib.rs` and re-run the review command. No re-indexing is needed — the index is reused across review runs.
+
+```bash
+# Edit prompts, then run review directly
+RUST_LOG=info cargo run -- review --path /path/to/repo --diff-file /tmp/test.diff
+```
+
+<Tip>
+  Only re-index when the codebase changes significantly or when you want to refresh LLM summaries and embeddings.
+</Tip>
+
+## Verbose output
+
+Set `RUST_LOG=info` for detailed pipeline output. This shows which files were retrieved, token budget allocation, and per-finding log lines as they are produced.
+
+```bash
+RUST_LOG=info cargo run -- review --path /path/to/repo --diff-file /tmp/test.diff
+```

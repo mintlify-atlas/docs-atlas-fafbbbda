@@ -1,0 +1,108 @@
+---
+title: "Repository indexing"
+description: "How Snif builds and maintains the structural and semantic index of your repository that powers context-aware code review."
+---
+
+The quality of Snif's review output is directly tied to the quality of context it can assemble. The repository index is what makes that context possible. Without it, a model reviewing a diff sees only the changed lines. With it, Snif can retrieve the files that import the changed code, the tests that cover it, the related implementations elsewhere in the repository, and the co-change history that reveals hidden dependencies.
+
+## Two-pass indexing
+
+Building the index takes two passes over the repository.
+
+<Steps>
+  <Step title="Structural pass">
+    Tree-sitter parses every source file into an AST. The parser extracts imports, symbol definitions (functions, classes, types, interfaces), symbol references, and exports from each file.
+
+    From this parsed data, the graph builder assembles:
+
+    - **Import graph** — which files import which, in both directions
+    - **Symbol index** — where each symbol is defined and where it is referenced across the repository
+    - **Test map** — links source files to their test files by tracking which test files import which source modules, not just by naming convention
+    - **Co-change graph** — derived from git history; files that frequently change together across commits are given a correlation score that often reflects real dependencies the import graph misses
+  </Step>
+  <Step title="Semantic pass">
+    The summarizer walks the structural graph bottom-up and generates natural language descriptions of each code unit through the configured LLM provider. The order matters:
+
+    1. Functions are summarized first
+    2. Classes that contain those functions are summarized next
+    3. Files are summarized using their class and function summaries
+    4. Directories are summarized using their file summaries
+
+    The embedding module then converts each summary into a 384-dimension vector and writes it to the index database alongside the structural data.
+
+    <Note>
+      This bottom-up summarization order means each summary can reference the summaries of its contained units, producing more accurate file- and directory-level descriptions.
+    </Note>
+  </Step>
+</Steps>
+
+## Incremental updates
+
+On subsequent runs, `snif index` reads the git diff since the last indexed commit and reprocesses only the affected files. Summaries and embeddings are regenerated only for code units that changed or whose dependencies changed.
+
+This keeps indexing fast on active repositories. A full rebuild is available with the `--full` flag but is rarely necessary.
+
+```bash
+# Incremental update (default)
+snif index
+
+# Full rebuild from scratch
+snif index --full
+```
+
+## What's stored
+
+Everything is stored in a single local SQLite database with vector extensions at `.snif/index.db` by default. No external vector database, no hosted service.
+
+<AccordionGroup>
+  <Accordion title="Structural tables">
+    | Table | Contents |
+    |-------|----------|
+    | `files` | Path, content hash, language, and indexed timestamp for every file |
+    | `symbols` | Name, kind, line range, and parent for every symbol definition |
+    | `imports` | Import edges between files |
+    | `refs` | Symbol reference sites with line numbers |
+    | `cochange` | File-pair correlation scores from git history |
+    | `summaries` | LLM-generated natural language descriptions per code unit |
+  </Accordion>
+  <Accordion title="Vector tables">
+    | Table | Contents |
+    |-------|----------|
+    | `summary_embeddings` | 384-dimension float vectors for each summary |
+    | `finding_embeddings` | Vectors used by the output layer for deduplication |
+  </Accordion>
+</AccordionGroup>
+
+## Supported languages
+
+Structural parsing is handled by tree-sitter grammars. The languages with full structural support are:
+
+- Rust
+- TypeScript
+- Python
+
+Adding support for a new language requires adding a tree-sitter grammar and a small extraction adapter. Languages without a grammar still receive keyword retrieval as a fallback during review.
+
+The set of indexed languages is configurable in `.snif.json`.
+
+## When to run
+
+<CardGroup cols={3}>
+  <Card title="On each commit" icon="code-commit">
+    Install as a post-commit git hook so the index stays current as you work.
+  </Card>
+  <Card title="As a CI setup step" icon="circle-play">
+    Run `snif index` before `snif review` in your CI pipeline to ensure the index reflects the current state of the branch.
+  </Card>
+  <Card title="Manually" icon="terminal">
+    Run `snif index` from the command line at any time to update or rebuild the index.
+  </Card>
+</CardGroup>
+
+## Token cost
+
+Summarization is the only step that calls the LLM. It runs per-commit against changed code units, not per-review. Once a code unit is summarized and its summary is stable, subsequent reviews retrieve that summary from the database without making additional model calls.
+
+<Tip>
+  On a large repository, the first `snif index --full` will generate summaries for every function, class, file, and directory. After that, only the changed code units are re-summarized on each commit.
+</Tip>

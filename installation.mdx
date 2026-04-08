@@ -1,0 +1,125 @@
+---
+title: "Installation"
+description: "Install Snif as a pre-built binary, build it from source, or run it with Docker."
+---
+
+## Supported platforms
+
+Pre-built binaries are provided for **Linux x86_64**. Building from source works on any platform supported by the Rust toolchain (Linux, macOS, Windows).
+
+## Pre-built binary (recommended)
+
+Download the binary from the [GitHub Releases page](https://github.com/AssahBismarkabah/Snif/releases). Each release includes the binary archive, a SHA-256 checksum, and a cosign signature for supply-chain verification.
+
+<Tabs>
+  <Tab title="Quick install">
+    ```bash
+    SNIF_VERSION="3.2.3"
+    curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz" -O
+    tar xJf snif-x86_64-unknown-linux-gnu.tar.xz
+    mv snif-x86_64-unknown-linux-gnu/snif /usr/local/bin/snif
+    ```
+  </Tab>
+  <Tab title="With cosign verification">
+    Verify the release signature with [cosign](https://github.com/sigstore/cosign) before installing:
+
+    ```bash
+    SNIF_VERSION="3.2.3"
+
+    # Download the archive and verification files
+    curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz" -O
+    curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256" -O
+    curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256.sig" -O
+    curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256.pem" -O
+
+    # Verify the signature
+    cosign verify-blob snif-x86_64-unknown-linux-gnu.tar.xz.sha256 \
+      --signature snif-x86_64-unknown-linux-gnu.tar.xz.sha256.sig \
+      --certificate snif-x86_64-unknown-linux-gnu.tar.xz.sha256.pem \
+      --certificate-identity "https://github.com/AssahBismarkabah/Snif/.github/workflows/sign-release.yml@refs/heads/main" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+    # Verify the checksum and extract
+    sha256sum -c snif-x86_64-unknown-linux-gnu.tar.xz.sha256
+    tar xJf snif-x86_64-unknown-linux-gnu.tar.xz
+    mv snif-x86_64-unknown-linux-gnu/snif /usr/local/bin/snif
+    ```
+
+    <Note>
+      cosign is available via `brew install cosign`, the [cosign releases page](https://github.com/sigstore/cosign/releases), or the `sigstore/cosign-installer` GitHub Actions step.
+    </Note>
+  </Tab>
+</Tabs>
+
+Confirm the installation:
+
+```bash
+snif --version
+```
+
+## Build from source
+
+Building from source requires the Rust toolchain version 1.70 or later. Install it from [rustup.rs](https://rustup.rs) if you don't have it.
+
+```bash
+git clone https://github.com/AssahBismarkabah/Snif.git
+cd Snif
+cargo build --release
+```
+
+The compiled binary is placed at `target/release/snif`. Copy it to a directory on your `PATH`:
+
+```bash
+cp target/release/snif /usr/local/bin/snif
+```
+
+<Tip>
+  Use `cargo build --profile dist` for a release build with thin LTO enabled, which produces a slightly smaller and faster binary.
+</Tip>
+
+## Docker
+
+The official Docker image bundles the Linux x86_64 binary. It expects the binary to be present at `dist/snif-linux-x86_64` relative to the build context (this is how the CI release pipeline works). To use the image in CI, pull it from the release artifacts or build it after downloading the binary:
+
+```bash
+SNIF_VERSION="3.2.3"
+
+# Download the binary to the dist directory
+mkdir -p dist
+curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz" | \
+  tar xJ --strip-components=1 -C dist/
+mv dist/snif dist/snif-linux-x86_64
+
+# Build the image
+docker build -t snif:latest .
+```
+
+Run a review from inside the container by mounting the repository:
+
+```bash
+docker run --rm \
+  -e SNIF_API_KEY="$SNIF_API_KEY" \
+  -e GITHUB_TOKEN="$GITHUB_TOKEN" \
+  -v /path/to/repo:/workspace \
+  snif:latest review --path /workspace --repo owner/repo --pr 123
+```
+
+## Verify the installation
+
+After installing by any method, confirm that `snif` is on your `PATH` and working:
+
+```bash
+snif --version
+snif --help
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Configure Snif and run your first review.
+  </Card>
+  <Card title="CI integration" icon="circle-play" href="/ci/github-actions">
+    Add Snif to GitHub Actions or GitLab CI.
+  </Card>
+</CardGroup>

@@ -1,0 +1,109 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Snif",
+  "projectDescription": "A context-aware AI code review agent that indexes repository structure and uses semantic, structural, and keyword retrieval to post evidenced findings on pull requests.",
+  "theme": "luma",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/providers",
+              "configuration/environment-variables"
+            ]
+          },
+          {
+            "group": "CI Integration",
+            "pages": [
+              "ci/github-actions",
+              "ci/gitlab-ci",
+              "ci/generic-ci",
+              "ci/bot-identity"
+            ]
+          },
+          {
+            "group": "How It Works",
+            "pages": [
+              "concepts/indexing",
+              "concepts/context-retrieval",
+              "concepts/feedback-learning",
+              "concepts/output-filtering"
+            ]
+          },
+          {
+            "group": "Testing & Evaluation",
+            "pages": [
+              "testing/local-testing",
+              "testing/evaluation-harness"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "reference/snif-index",
+              "reference/snif-review",
+              "reference/snif-eval",
+              "reference/snif-clean"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "reference/architecture",
+              "reference/data-model"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Context-aware code review using structural, semantic, and keyword retrieval",
+    "Incremental repository indexing with tree-sitter AST parsing",
+    "LLM-generated summaries and vector embeddings stored in local SQLite",
+    "Feedback learning system that adapts to team preferences over time",
+    "Native GitHub and GitLab integration with inline PR/MR comments",
+    "Supports any OpenAI-compatible LLM provider (OpenAI, Bedrock, Azure, self-hosted)",
+    "Aggressive output filtering to minimize false positives and noise",
+    "Built-in evaluation harness with precision, recall, and noise-rate gates"
+  ],
+  "publicApiSurface": [
+    "snif index [--path <PATH>] [--full]",
+    "snif review [--path <PATH>] [--diff-file <FILE>] [--repo <OWNER/REPO>] [--pr <NUMBER>] [--format json|sarif]",
+    "snif eval --fixtures <PATH> [--path <PATH>]",
+    "snif clean [--path <PATH>]",
+    ".snif.json: model.review_model",
+    ".snif.json: model.summary_model",
+    ".snif.json: model.endpoint",
+    ".snif.json: platform.provider (github|gitlab)",
+    ".snif.json: index.languages",
+    ".snif.json: index.exclude_patterns",
+    ".snif.json: context.max_tokens",
+    ".snif.json: context.retrieval_weights",
+    ".snif.json: filter.min_confidence",
+    ".snif.json: filter.suppress_style_only",
+    "SNIF_API_KEY environment variable",
+    "GITHUB_TOKEN environment variable",
+    "GITLAB_TOKEN environment variable"
+  ]
+}

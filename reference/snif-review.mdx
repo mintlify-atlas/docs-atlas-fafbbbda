@@ -1,0 +1,127 @@
+---
+title: '`snif review`'
+description: 'Review a code change using indexed repository context. Fetches a diff from a local file or a pull/merge request, retrieves relevant context from the index, and produces structured findings.'
+---
+
+The `snif review` command is the core of Snif. It takes a diff — from a local file, a GitHub pull request, or a GitLab merge request — and runs it through the full retrieval and review pipeline. Findings are written to stdout. When using a platform adapter (`--repo`/`--pr` or `--project`/`--mr`), findings are also posted as inline review comments on the PR or MR.
+
+<Warning>
+  `snif index` must be run before `snif review`. Without an index the retrieval step cannot provide context to the LLM.
+</Warning>
+
+## Usage
+
+```bash
+snif review [--path <PATH>] [--diff-file <FILE>] [--repo <OWNER/REPO>] [--pr <NUMBER>] [--format json|sarif]
+```
+
+## Flags
+
+<ParamField path="--path" type="string" default=".">
+  Path to the repository root. Used to load `.snif.json` and open the index database.
+</ParamField>
+
+<ParamField path="--diff-file" type="string">
+  Path to a local unified diff file. Findings are printed to stdout. No platform credentials are required in this mode.
+</ParamField>
+
+<ParamField path="--repo" type="string">
+  GitHub repository in `owner/repo` format (e.g. `acme/backend`). Used with `--pr` to fetch the diff from GitHub and post inline review comments. Requires `GITHUB_TOKEN`.
+</ParamField>
+
+<ParamField path="--pr" type="number">
+  Pull request number (GitHub) or merge request IID (GitLab). Used together with `--repo` for GitHub or `--project` for GitLab.
+</ParamField>
+
+<ParamField path="--project" type="string">
+  GitLab project path in `group/project` format (e.g. `acme/backend`). Used with `--pr` or `--mr` to fetch the diff from GitLab and post inline MR comments. Requires `GITLAB_TOKEN`.
+</ParamField>
+
+<ParamField path="--mr" type="number">
+  GitLab merge request IID. Alias for `--pr` when working with GitLab.
+</ParamField>
+
+<ParamField path="--platform" type="string">
+  Force a specific platform: `github` or `gitlab`. When omitted, the platform is auto-detected from CI environment variables (`GITHUB_REPOSITORY` for GitHub, `CI_PROJECT_PATH` for GitLab), then falls back to the `platform.provider` value in `.snif.json`.
+</ParamField>
+
+<ParamField path="--format" type="string" default="json">
+  Output format for findings. Accepted values: `json` (default) or `sarif`. When `sarif` is selected, findings are written to `findings.sarif` in the current directory in addition to stdout.
+</ParamField>
+
+## Input modes
+
+One of `--diff-file` or a platform source (`--repo`/`--pr`, `--project`/`--mr`) must be provided.
+
+| Mode | Flags required | Credentials required |
+|------|---------------|---------------------|
+| Local diff file | `--diff-file` | None |
+| GitHub PR | `--repo`, `--pr` | `GITHUB_TOKEN` |
+| GitLab MR | `--project` (or `--repo`), `--pr` (or `--mr`) | `GITLAB_TOKEN` |
+
+## Environment variables
+
+| Variable | Required for | Description |
+|----------|-------------|-------------|
+| `SNIF_API_KEY` / `OPENAI_API_KEY` | All modes | API key for the configured LLM provider. |
+| `GITHUB_TOKEN` | GitHub mode | Personal access token or GitHub App token with PR read and review comment write access. |
+| `GITLAB_TOKEN` | GitLab mode | Personal or project access token with `api` scope. Falls back to `CI_JOB_TOKEN` in GitLab CI. |
+| `GITHUB_REPOSITORY` | GitHub CI | Auto-set by GitHub Actions. Format: `owner/repo`. |
+| `SNIF_PR_NUMBER` | GitHub CI | Pull request number when running in CI without `--pr`. |
+| `CI_PROJECT_PATH` | GitLab CI | Auto-set by GitLab CI. Format: `group/project`. |
+| `CI_MERGE_REQUEST_IID` | GitLab CI | Auto-set in merge request pipelines. |
+| `CI_API_V4_URL` | GitLab CI | Auto-set by GitLab CI. Used for self-hosted GitLab instances. |
+
+## Output
+
+Findings are printed to stdout as a JSON array. Each finding includes the file path, line range, category, confidence score, evidence, explanation, impact, and an optional suggestion. A fingerprint is included for deduplication across reruns.
+
+When `--format sarif` is used, findings are also written to `findings.sarif` in SARIF 2.1 format, suitable for upload to GitHub Advanced Security or other SARIF-compatible tools.
+
+When a platform adapter is active, Snif additionally:
+- Posts each finding as an inline review comment on the PR or MR.
+- Posts a summary comment with statistics (files changed, findings, model used, duration).
+- Resolves prior findings that no longer appear in the current review.
+
+<Note>
+  If no findings pass the configured confidence threshold, nothing is printed to stdout and no comments are posted.
+</Note>
+
+## Examples
+
+**Review a local diff file:**
+
+```bash
+snif review --diff-file changes.diff
+```
+
+**Review a GitHub pull request:**
+
+```bash
+GITHUB_TOKEN=ghp_... snif review --repo acme/backend --pr 42
+```
+
+**Review a GitLab merge request:**
+
+```bash
+GITLAB_TOKEN=glpat-... snif review --project acme/backend --mr 17
+```
+
+**Review a GitHub PR and output SARIF:**
+
+```bash
+GITHUB_TOKEN=ghp_... snif review --repo acme/backend --pr 42 --format sarif
+```
+
+**Review from a GitHub Actions workflow:**
+
+```bash
+# GITHUB_TOKEN and GITHUB_REPOSITORY are already set by Actions
+snif review --pr ${{ github.event.pull_request.number }}
+```
+
+**Verbose logging:**
+
+```bash
+RUST_LOG=info snif review --diff-file changes.diff
+```

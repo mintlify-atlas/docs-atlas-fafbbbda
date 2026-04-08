@@ -1,0 +1,80 @@
+---
+title: "LLM provider setup"
+description: "Snif works with any OpenAI-compatible endpoint. Configure the model section of .snif.json to connect to OpenAI, AWS Bedrock, Azure OpenAI, or a self-hosted model."
+---
+
+Snif uses the OpenAI chat completions API format. Any endpoint that implements `/chat/completions` works, including AWS Bedrock with Claude, Azure OpenAI, and local model servers.
+
+Set `model.endpoint` to the base URL of your provider — Snif appends `/chat/completions` automatically. Pass your API key via the `SNIF_API_KEY` environment variable (or `OPENAI_API_KEY` as a fallback).
+
+## Provider examples
+
+<CodeGroup>
+
+```json OpenAI
+{
+  "model": {
+    "review_model": "gpt-4o",
+    "summary_model": "gpt-4o-mini",
+    "endpoint": "https://api.openai.com/v1"
+  }
+}
+```
+
+```json AWS Bedrock (Claude)
+{
+  "model": {
+    "review_model": "anthropic.claude-sonnet-4-6",
+    "summary_model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+    "endpoint": "https://bedrock-runtime.us-west-2.amazonaws.com/v1"
+  }
+}
+```
+
+```json Azure OpenAI
+{
+  "model": {
+    "review_model": "gpt-4o",
+    "summary_model": "gpt-4o-mini",
+    "endpoint": "https://your-resource.openai.azure.com/openai/deployments/your-deployment/v1"
+  }
+}
+```
+
+```json Self-hosted / local
+{
+  "model": {
+    "review_model": "your-model-name",
+    "summary_model": "your-model-name",
+    "endpoint": "http://localhost:8080/v1"
+  }
+}
+```
+
+</CodeGroup>
+
+## Model selection guidance
+
+Snif uses two models for different tasks:
+
+**`review_model`** — Used for code review. This is the performance-critical path. Use the most capable reasoning model your budget allows. The model needs to understand code structure, identify bugs, and produce structured findings.
+
+**`summary_model`** — Used during `snif index` to generate short code summaries. Summaries are factual and short, so a cheaper, faster model works well here. Using a smaller model for summarization reduces indexing cost significantly.
+
+<Tip>
+  A common setup is a large reasoning model for `review_model` (e.g., `gpt-4o` or `claude-sonnet`) and a smaller, faster model for `summary_model` (e.g., `gpt-4o-mini` or `claude-haiku`).
+</Tip>
+
+## CI environments
+
+In CI pipelines, you may need to vary the endpoint without modifying `.snif.json`. Use the `SNIF_ENDPOINT` environment variable to override `model.endpoint` at runtime:
+
+```bash
+export SNIF_ENDPOINT=https://your-provider.com/v1
+export SNIF_API_KEY=$YOUR_API_KEY_SECRET
+snif review --repo owner/repo --pr 42
+```
+
+This is useful when the endpoint differs between local development and CI, or when you want to keep endpoint configuration out of the committed `.snif.json`.
+
+See [Environment variables](/configuration/environment-variables) for the full list of variables that can override config file values.

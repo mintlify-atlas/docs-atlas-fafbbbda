@@ -1,0 +1,53 @@
+---
+title: "Introduction"
+description: "Snif is a context-aware AI code review agent that ships as a single Rust binary."
+---
+
+## What is Snif?
+
+Snif is a code review agent that understands your codebase. It indexes the repository structure, generates semantic summaries, and uses that context to review pull requests with specific, evidenced, and actionable findings.
+
+It ships as a single Rust binary designed for CI pipelines. On each commit, it builds a structural graph, generates LLM summaries, and embeds them for search. On each pull request, it retrieves related code using structural, semantic, and keyword methods, then runs a single review call and posts only findings that survive aggressive filtering.
+
+## The problem with diff-only review tools
+
+Most AI code review tools operate on the diff alone. They see only the lines that changed — with no knowledge of how those lines relate to the rest of the codebase. The result is shallow, generic findings that miss the bugs that actually matter: the ones that break assumptions in callers, violate invariants elsewhere in the system, or conflict with patterns established in adjacent modules.
+
+Snif solves this by building a structural and semantic index of the entire repository before review begins. When a pull request arrives, it uses that index to retrieve the code that is actually relevant to the change — function call graphs, semantically similar modules, and keyword-matched symbols — and grounds every finding in that context.
+
+## Key capabilities
+
+- **Structural, semantic, and keyword retrieval** — three complementary methods for finding related code, combined with configurable ranking weights
+- **Incremental indexing** — only changed files are reprocessed on subsequent runs; the full rebuild flag (`--full`) is available when needed
+- **Feedback learning** — a feedback store accumulates developer signals over time and suppresses finding patterns that are consistently dismissed
+- **GitHub and GitLab integration** — posts findings as inline review comments on pull requests and merge requests; supports self-hosted instances
+- **Any OpenAI-compatible LLM provider** — works with OpenAI, AWS Bedrock, Azure, or any self-hosted endpoint that implements the chat completions API
+- **Output filtering** — configurable confidence threshold and style-finding suppression reduce noise before results are posted
+
+## How it fits into a CI workflow
+
+Snif runs in two stages, typically in the same CI job:
+
+1. **Index** — run on every commit to keep the repository index current. The index is cached between runs so only changed files are reprocessed.
+2. **Review** — run on every pull request or merge request. Snif fetches the diff, retrieves relevant context from the index, calls the LLM once, filters the findings, and posts inline comments.
+
+Because the index is built separately from the review, the review step is fast — it does not re-parse the repository on every PR.
+
+## Prerequisites
+
+- **Rust 1.70 or later** — required only when building from source. Pre-built binaries are available on the [releases page](https://github.com/AssahBismarkabah/Snif/releases).
+- **OpenAI-compatible LLM provider** — you need an endpoint URL and an API key. This can be OpenAI, AWS Bedrock, Azure OpenAI, or any compatible self-hosted endpoint.
+
+## Next steps
+
+<CardGroup cols={3}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Get Snif running on your repository in five steps.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    All configuration fields, provider examples, and environment variables.
+  </Card>
+  <Card title="CI integration" icon="circle-play" href="/ci/github-actions">
+    Set up Snif in GitHub Actions or GitLab CI.
+  </Card>
+</CardGroup>

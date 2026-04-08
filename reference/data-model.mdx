@@ -1,0 +1,291 @@
+---
+title: 'Data model'
+description: 'The canonical internal types used across all Snif crates, defined in snif-types.'
+---
+
+All core types are defined in the `snif-types` crate and shared across the pipeline. This page documents each type, its fields, and how it is used at runtime.
+
+## Review request
+
+The canonical input for a workflow run. Carries platform identity, change identity, and repository location. Constructed by the platform adapter before the pipeline starts.
+
+## Context package
+
+The assembled payload passed to the prompt layer. Built by `snif-context::builder` from all retrieval results after the budget module has applied limits.
+
+<ResponseField name="metadata" type="ChangeMetadata">
+  Descriptive information about the change.
+
+  <Expandable title="ChangeMetadata fields">
+    <ResponseField name="title" type="string | null">
+      Pull request or merge request title.
+    </ResponseField>
+    <ResponseField name="author" type="string | null">
+      Author of the change.
+    </ResponseField>
+    <ResponseField name="base_branch" type="string | null">
+      Target branch for the change.
+    </ResponseField>
+    <ResponseField name="description" type="string | null">
+      PR/MR description body.
+    </ResponseField>
+    <ResponseField name="labels" type="string[]">
+      Labels attached to the change.
+    </ResponseField>
+    <ResponseField name="commit_messages" type="string[]">
+      Commit messages included in the change.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="diff" type="string">
+  The full unified diff for the change. Always included in the token budget.
+</ResponseField>
+
+<ResponseField name="changed_files" type="ContextFile[]">
+  Full contents of files directly modified in the diff. Included after the diff and before related files in the budget.
+
+  <Expandable title="ContextFile fields">
+    <ResponseField name="path" type="string">
+      Repository-relative file path.
+    </ResponseField>
+    <ResponseField name="content" type="string">
+      File content at the content tier selected by the budget module.
+    </ResponseField>
+    <ResponseField name="summary" type="string | null">
+      LLM-generated natural language summary from the index, if available.
+    </ResponseField>
+    <ResponseField name="retrieval_score" type="float | null">
+      Composite retrieval score used for ranking. Null for changed files included unconditionally.
+    </ResponseField>
+    <ResponseField name="content_tier" type="Full | SummaryOnly | DiffOnly">
+      How much content was included. `Full` includes the complete file. `SummaryOnly` includes only the LLM summary. `DiffOnly` includes only the diff hunks for that file.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="related_files" type="ContextFile[]">
+  Files retrieved from the index to provide broader context. Ranked and selected by the budget module. Same structure as `changed_files`.
+</ResponseField>
+
+<ResponseField name="omissions" type="Omission[]">
+  Files that were ranked but dropped when the token budget was exhausted.
+
+  <Expandable title="Omission fields">
+    <ResponseField name="path" type="string">
+      Repository-relative file path.
+    </ResponseField>
+    <ResponseField name="score" type="float">
+      Retrieval score at the time of omission.
+    </ResponseField>
+    <ResponseField name="reason" type="string">
+      Human-readable explanation of why the file was omitted (e.g., budget exhausted).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="budget" type="BudgetReport">
+  Token accounting for the assembled context.
+
+  <Expandable title="BudgetReport fields">
+    <ResponseField name="total_budget" type="usize">Configured token limit.</ResponseField>
+    <ResponseField name="diff_tokens" type="usize">Tokens used by the diff.</ResponseField>
+    <ResponseField name="changed_files_tokens" type="usize">Tokens used by changed file contents.</ResponseField>
+    <ResponseField name="related_files_tokens" type="usize">Tokens used by related files from retrieval.</ResponseField>
+    <ResponseField name="remaining_tokens" type="usize">Unused tokens at time of assembly.</ResponseField>
+    <ResponseField name="files_included" type="usize">Total number of files included.</ResponseField>
+    <ResponseField name="files_omitted" type="usize">Total number of files dropped due to budget exhaustion.</ResponseField>
+    <ResponseField name="files_full" type="usize">Files included at the `Full` content tier.</ResponseField>
+    <ResponseField name="files_summary_only" type="usize">Files included at the `SummaryOnly` content tier.</ResponseField>
+    <ResponseField name="files_diff_only" type="usize">Files included at the `DiffOnly` content tier.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Finding
+
+The normalized representation of a model-reported issue. Produced by `snif-output::parser` and processed through the filter, feedback filter, and fingerprint stages before publication.
+
+<ResponseField name="file" type="string">
+  Repository-relative path of the file containing the issue.
+</ResponseField>
+
+<ResponseField name="start_line" type="usize">
+  First line of the relevant code range (1-indexed).
+</ResponseField>
+
+<ResponseField name="end_line" type="usize | null">
+  Last line of the relevant code range. Null for single-line findings.
+</ResponseField>
+
+<ResponseField name="category" type="logic | security | convention | performance | style | other">
+  Classification of the finding type.
+</ResponseField>
+
+<ResponseField name="confidence" type="float">
+  Model confidence in the finding, in the range `[0.0, 1.0]`. May be adjusted upward by the feedback filter if the finding resembles past-accepted output.
+</ResponseField>
+
+<ResponseField name="evidence" type="string">
+  Specific code excerpt or reference from the provided context that supports the finding.
+</ResponseField>
+
+<ResponseField name="explanation" type="string">
+  Clear description of the issue and why it matters.
+</ResponseField>
+
+<ResponseField name="impact" type="string">
+  User-relevant consequence if the issue is not addressed.
+</ResponseField>
+
+<ResponseField name="suggestion" type="string | null">
+  Optional concrete fix or recommendation.
+</ResponseField>
+
+<ResponseField name="fingerprint" type="Fingerprint | null">
+  Stable identity computed after filtering. Null before the fingerprint stage. See [Fingerprint](#fingerprint) below.
+</ResponseField>
+
+### Finding output format
+
+`snif review` outputs findings as a JSON array. Each element corresponds to one `Finding`:
+
+```json
+[
+  {
+    "file": "src/auth/session.rs",
+    "start_line": 42,
+    "end_line": 55,
+    "category": "security",
+    "confidence": 0.91,
+    "evidence": "let token = format!(\"{}\", user_id);",
+    "explanation": "Session tokens derived directly from user IDs are predictable and allow session fixation.",
+    "impact": "An attacker who knows a user ID can forge a valid session token.",
+    "suggestion": "Use a cryptographically secure random token generator instead.",
+    "fingerprint": {
+      "id": "a3f9c2b1d4e7...",
+      "line_id": "7f1e4a2c9b3d..."
+    }
+  }
+]
+```
+
+## Fingerprint
+
+A stable identity key used to match findings across reruns of the same change. Computed by `snif-output::fingerprint`.
+
+<ResponseField name="id" type="string">
+  Content-based hash derived from file path, category, and normalized evidence. Stable across rebases — survives line number shifts.
+</ResponseField>
+
+<ResponseField name="line_id" type="string">
+  Line-based hash derived from file path, `start_line`, `end_line`, and category. Used for backward compatibility with prior posted comments.
+</ResponseField>
+
+<Note>
+  The `id` field is the primary identity. Use `line_id` only when matching against comments posted by older versions of Snif that did not compute a content-based hash.
+</Note>
+
+## Retrieval result
+
+Produced by `snif-retrieval` during context assembly. Carries the retrieval score and the methods that contributed to it.
+
+<ResponseField name="path" type="string">
+  Repository-relative file path.
+</ResponseField>
+
+<ResponseField name="score" type="float">
+  Weighted composite score combining relationship type, retrieval method, and match strength. Used for ranking by the budget module.
+</ResponseField>
+
+<ResponseField name="sources" type="RetrievalMethod[]">
+  One or more retrieval methods that matched this file.
+
+  <Expandable title="RetrievalMethod variants">
+    <ResponseField name="Structural(StructuralReason)" type="variant">
+      Matched via the relationship graph.
+
+      `StructuralReason` is one of:
+      - `DirectImport` — this file is imported by a changed file
+      - `ReverseImport` — this file imports a changed file
+      - `CoChange { correlation: float }` — this file frequently co-changes with a changed file in git history
+      - `SymbolReference { symbol_name: string }` — this file references a symbol defined in a changed file
+    </ResponseField>
+    <ResponseField name="Semantic { distance: float }" type="variant">
+      Matched via vector similarity search on LLM summaries. `distance` is the embedding distance from the query.
+    </ResponseField>
+    <ResponseField name="Keyword { matched_terms: string[] }" type="variant">
+      Matched via exact identifier, type name, or string literal search. `matched_terms` lists the terms that triggered the match.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Run metadata
+
+Captured at the end of every `snif review` run for observability. Covers timing, token usage, context decisions, finding counts through each filter stage, and feedback actions.
+
+Every run captures: duration, token usage, context size, truncation decisions, retrieval method breakdown (structural / semantic / keyword file counts), finding counts before and after each filter stage, feedback filter actions, comment posting and resolution actions, and evaluation metrics when running `snif eval`.
+
+## Evaluation result
+
+Records per-fixture and aggregate benchmark outcomes. Produced by `snif-eval` when running `snif eval`.
+
+Each fixture comparison yields:
+- whether actual findings matched expected findings (or expected silence)
+- per-finding match status
+
+Aggregate metrics across all fixtures:
+- **Precision** — fraction of reported findings that were expected
+- **Recall** — fraction of expected findings that were reported
+- **Noise rate** — fraction of reported findings that were not expected
+
+The command exits non-zero if any configured quality gate threshold is not met.
+
+## Feedback signal
+
+Records a developer action on a finding, stored per team in the feedback SQLite database.
+
+<ResponseField name="signal_type" type="accepted | dismissed | ignored">
+  The developer action observed on the finding. `accepted` means the finding was acted on (resolved after fixing). `dismissed` means the developer explicitly rejected it. `ignored` means no action was taken.
+</ResponseField>
+
+<ResponseField name="finding_embedding" type="float[]">
+  Vector embedding of the finding text. Used for similarity matching when the feedback filter evaluates new findings against past signals.
+</ResponseField>
+
+<ResponseField name="team_id" type="string">
+  Identifier for the team. Feedback signals are scoped per team so different teams on the same repository learn independent preferences.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp of when the signal was recorded.
+</ResponseField>
+
+## Storage
+
+Snif uses two local SQLite databases. Neither requires external services.
+
+| Database | Default path | Contents |
+|----------|-------------|----------|
+| `index.db` | `.snif/index.db` | Repository index: parsed structural data, relationship graph, co-change correlations, LLM summaries, vector embeddings. |
+| Feedback store | `.snif/feedback.db` | Per-team feedback signals: finding text, embedding vectors, signal types, timestamps. |
+
+Configure the index database path with `index.db_path` in `.snif.json` or the `SNIF_DB_PATH` environment variable. The feedback store path is not separately configurable and always lives in `.snif/`.
+
+<Warning>
+  LLM-generated summaries in `index.db` do not contain raw source code, but they describe your repository's logic in natural language. Apply the same access controls to `.snif/` as you apply to the source itself. Add `.snif/` to `.gitignore`.
+</Warning>
+
+## Supported languages
+
+The parser crate (`snif-parser`) supports tree-sitter grammars for the following languages:
+
+```rust
+pub enum Language {
+    Rust,
+    TypeScript,
+    Python,
+    Java,
+}
+```
+
+Each language has a corresponding extraction adapter that maps tree-sitter AST nodes to the `FileExtraction` type: imports, symbols (functions, methods, structs, classes, enums, traits, interfaces, type aliases, modules, constants), and cross-file references.

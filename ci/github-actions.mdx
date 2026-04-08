@@ -1,0 +1,129 @@
+---
+title: "GitHub Actions"
+description: "Run Snif code review automatically on every pull request using GitHub Actions."
+---
+
+GitHub Actions is the primary supported platform. Snif posts findings as inline PR review comments on the pull request that triggered the workflow.
+
+## Prerequisites
+
+- A repository with a `.snif.json` configuration file at the root
+- An `SNIF_API_KEY` secret configured in your repository settings (**Settings > Secrets and variables > Actions**)
+
+## Setup
+
+<Tabs>
+  <Tab title="Pre-built binary (recommended)">
+
+Add this workflow file to your repository at `.github/workflows/snif-review.yml`:
+
+```yaml .github/workflows/snif-review.yml
+name: Snif Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Install Snif
+        env:
+          SNIF_VERSION: "3.2.1"
+        run: |
+          curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz" -O
+          curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256" -O
+          curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256.sig" -O
+          curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-x86_64-unknown-linux-gnu.tar.xz.sha256.pem" -O
+          cosign verify-blob snif-x86_64-unknown-linux-gnu.tar.xz.sha256 \
+            --signature snif-x86_64-unknown-linux-gnu.tar.xz.sha256.sig \
+            --certificate snif-x86_64-unknown-linux-gnu.tar.xz.sha256.pem \
+            --certificate-identity "https://github.com/AssahBismarkabah/Snif/.github/workflows/sign-release.yml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          sha256sum -c snif-x86_64-unknown-linux-gnu.tar.xz.sha256
+          tar xJf snif-x86_64-unknown-linux-gnu.tar.xz
+          mv snif-x86_64-unknown-linux-gnu/snif /usr/local/bin/snif
+
+      - name: Cache Snif index
+        uses: actions/cache@v4
+        with:
+          path: .snif/
+          key: snif-index-${{ github.repository }}
+
+      - name: Index repository
+        run: snif index --path .
+        env:
+          SNIF_API_KEY: ${{ secrets.SNIF_API_KEY }}
+
+      - name: Review pull request
+        run: |
+          snif review \
+            --path . \
+            --repo "$GITHUB_REPO" \
+            --pr "$PR_NUMBER"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNIF_API_KEY: ${{ secrets.SNIF_API_KEY }}
+          GITHUB_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SNIF_PR_NUMBER: ${{ github.event.pull_request.number }}
+```
+
+The `cosign verify-blob` step verifies the release signature using Sigstore before installation. Do not skip this step.
+
+  </Tab>
+  <Tab title="Build from source">
+
+Use this approach for the Snif repository itself or for forks where you want to test local changes.
+
+Replace the install step with the following steps in your workflow:
+
+```yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release
+      - name: Index
+        run: ./target/release/snif index --path .
+```
+
+  </Tab>
+</Tabs>
+
+## Required secrets
+
+| Secret | Description |
+|--------|-------------|
+| `SNIF_API_KEY` | Your LLM provider API key. Add this in **Settings > Secrets and variables > Actions**. |
+| `GITHUB_TOKEN` | Provided automatically by GitHub Actions — no configuration needed. Used to post PR comments and fetch PR data. |
+
+## Permissions
+
+The workflow requires these permissions to function:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
+
+`pull-requests: write` is required to post inline review comments. `contents: read` is required to check out the repository.
+
+## Caching
+
+The `actions/cache@v4` step caches the `.snif/` directory between runs. This directory stores the repository index built by `snif index`. Caching it avoids re-indexing the full repository on every pull request, which reduces run time significantly on large codebases.
+
+<Tip>
+  To customize the bot identity that posts review comments, see [Bot identity](/ci/bot-identity).
+</Tip>

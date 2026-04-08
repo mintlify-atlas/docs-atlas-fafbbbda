@@ -1,0 +1,162 @@
+---
+title: "Configuration overview"
+description: "Configure Snif using a .snif.json file at your repository root. All fields are optional with sensible defaults — a minimal setup only requires model settings."
+---
+
+The `.snif.json` file lives at the root of the repository being reviewed. It controls the LLM provider, indexing behavior, context retrieval, and output filtering. Commit it to your repository — it contains no secrets.
+
+<Note>
+  All fields are optional. The only fields required to run `snif review` are `model.endpoint` and `model.review_model`. Set `model.summary_model` to run `snif index` with LLM summaries.
+</Note>
+
+## Minimal configuration
+
+```json .snif.json
+{
+  "model": {
+    "review_model": "gpt-4o",
+    "summary_model": "gpt-4o-mini",
+    "endpoint": "https://api.openai.com/v1"
+  }
+}
+```
+
+All other sections use their defaults when omitted. See [LLM provider setup](/configuration/providers) for other provider examples.
+
+## Full example
+
+```json .snif.json
+{
+  "platform": {
+    "provider": "github"
+  },
+  "model": {
+    "review_model": "gpt-4o",
+    "summary_model": "gpt-4o-mini",
+    "endpoint": "https://api.openai.com/v1"
+  },
+  "index": {
+    "db_path": ".snif/index.db",
+    "embedding_dimension": 384,
+    "languages": ["rust", "typescript", "python", "java"],
+    "exclude_patterns": ["target", "node_modules", "vendor", ".git", "build", ".gradle", ".mvn"]
+  },
+  "context": {
+    "max_tokens": 128000,
+    "max_files": 50,
+    "output_reserve_tokens": 32000,
+    "retrieval_weights": {
+      "structural": 1.0,
+      "semantic": 0.7,
+      "keyword": 0.3
+    }
+  },
+  "filter": {
+    "min_confidence": 0.7,
+    "suppress_style_only": true,
+    "feedback_min_signals": 20
+  },
+  "conventions_paths": [],
+  "eval_fixtures_path": null
+}
+```
+
+## Configuration sections
+
+### model
+
+Controls the LLM provider connection and model selection.
+
+<ParamField body="review_model" type="string" required>
+  The model used for code review. Use a capable reasoning model — review quality depends on it. Default: `""`.
+</ParamField>
+
+<ParamField body="summary_model" type="string">
+  The model used during indexing to generate code summaries. A cheaper, faster model works well here since summaries are short and factual. Required for `snif index`. Default: `""`.
+</ParamField>
+
+<ParamField body="endpoint" type="string" required>
+  Base URL of any OpenAI-compatible chat completions API. Snif appends `/chat/completions` automatically. Supports OpenAI, AWS Bedrock, Azure OpenAI, and self-hosted endpoints. Default: `""`.
+</ParamField>
+
+### platform
+
+<ParamField body="provider" type="string" default="github">
+  The code hosting platform. Supported values: `github`, `gitlab`. In CI, the platform is auto-detected from environment variables (`GITHUB_REPOSITORY` for GitHub, `CI_PROJECT_PATH` for GitLab).
+</ParamField>
+
+<ParamField body="api_base" type="string">
+  GitLab API base URL for self-hosted instances. Default: `https://gitlab.com/api/v4`. Not needed for GitHub or gitlab.com. In GitLab CI, `CI_API_V4_URL` is read automatically.
+</ParamField>
+
+### index
+
+<ParamField body="db_path" type="string" default=".snif/index.db">
+  Path to the SQLite database that stores the repository index. Can be overridden by the `SNIF_DB_PATH` environment variable.
+</ParamField>
+
+<ParamField body="embedding_dimension" type="number" default="384">
+  Vector dimension for the embedding model. Matches the AllMiniLML6V2 model used by fastembed. Do not change this unless you change the embedding model.
+</ParamField>
+
+<ParamField body="languages" type="string[]" default='["rust", "typescript", "python", "java"]'>
+  Languages to parse during indexing. Files in unlisted languages are skipped.
+</ParamField>
+
+<ParamField body="exclude_patterns" type="string[]" default='["target", "node_modules", "vendor", ".git", "build", ".gradle", ".mvn"]'>
+  Directory names to skip during parsing.
+</ParamField>
+
+### context
+
+<ParamField body="max_tokens" type="number" default="128000">
+  Maximum token budget for the rendered prompt sent to the LLM during review. Token count is estimated at 3 characters per token. If the rendered prompt exceeds this limit, Snif removes the lowest-ranked related files until it fits.
+</ParamField>
+
+<ParamField body="max_files" type="number" default="50">
+  Maximum number of related files to include in the context.
+</ParamField>
+
+<ParamField body="output_reserve_tokens" type="number" default="32000">
+  Number of tokens reserved for the model's response output. The effective prompt budget is `max_tokens - output_reserve_tokens`. Default: `32000`.
+</ParamField>
+
+<ParamField body="retrieval_weights" type="object">
+  Controls how structural, semantic, and keyword retrieval results are weighted when ranking related files. Higher weight means that retrieval method's results rank higher in the final list.
+
+  <Expandable title="properties">
+    <ParamField body="structural" type="number" default="1.0">
+      Weight for structural (import graph) retrieval.
+    </ParamField>
+    <ParamField body="semantic" type="number" default="0.7">
+      Weight for semantic (vector embedding) retrieval.
+    </ParamField>
+    <ParamField body="keyword" type="number" default="0.3">
+      Weight for keyword retrieval.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### filter
+
+<ParamField body="min_confidence" type="number" default="0.7">
+  Minimum confidence score for a finding to survive filtering. Findings below this threshold are suppressed. Range: `0.0`–`1.0`.
+</ParamField>
+
+<ParamField body="suppress_style_only" type="boolean" default="true">
+  When `true`, findings with category `style` or `convention` are suppressed from output.
+</ParamField>
+
+<ParamField body="feedback_min_signals" type="number" default="20">
+  Minimum number of developer feedback signals before the learned feedback filter activates. Until this threshold is reached, only the static filter runs.
+</ParamField>
+
+### Top-level fields
+
+<ParamField body="conventions_paths" type="string[]" default="[]">
+  List of file paths (relative to the repository root) containing coding conventions and review guidelines. These are included in the review context to help the model understand project-specific rules.
+</ParamField>
+
+<ParamField body="eval_fixtures_path" type="string">
+  Path to the directory containing evaluation benchmark fixtures. Used by `snif eval`. Default: `null`.
+</ParamField>

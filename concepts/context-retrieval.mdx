@@ -1,0 +1,105 @@
+---
+title: "Context retrieval"
+description: "How Snif expands beyond the changed files to assemble the related code a model needs to produce specific, evidenced findings."
+---
+
+A model reviewing a diff in isolation produces shallow, generic findings. A model reviewing a diff alongside the code it depends on, the tests that cover it, similar implementations elsewhere in the repository, and the conventions the team has agreed on produces findings that are specific and grounded in evidence.
+
+Context retrieval is how Snif closes that gap. When `snif review` runs, the context builder loads the changed file contents, then expands outward using three retrieval methods running in parallel.
+
+## The three retrieval methods
+
+<AccordionGroup>
+  <Accordion title="Structural retrieval">
+    Queries the relationship graph built during indexing for files directly connected to the changed code:
+
+    - **Direct imports** — files that the changed code imports
+    - **Reverse imports** — files that import the changed code (consumers)
+    - **Test files** — test modules linked to the changed source files
+    - **Co-change correlates** — files that have historically changed together with the changed files, weighted by correlation score
+    - **Symbol references** — files that reference symbols defined in the changed code
+
+    Structural retrieval is deterministic. The same change against the same index always returns the same results. It answers the question: what is directly connected to this code?
+  </Accordion>
+  <Accordion title="Semantic retrieval">
+    Takes the LLM-generated summaries of the changed code units, searches the vector store for summaries with high cosine similarity elsewhere in the repository, and returns matches not already covered by structural results.
+
+    This catches code that is related by purpose rather than by import path — other implementations of the same interface, other handlers following the same pattern, other modules touching the same domain.
+
+    Up to 20 semantic candidates are retrieved per run. It answers the question: what else in this repository does something similar to this code?
+  </Accordion>
+  <Accordion title="Keyword retrieval">
+    Searches for exact matches of identifiers, type names, and string literals extracted from the diff. It catches references that the structural parser missed and provides a fast fallback for languages without full tree-sitter grammar support.
+
+    Keyword retrieval is additive — it supplements structural and semantic results rather than replacing them.
+  </Accordion>
+</AccordionGroup>
+
+## Merging and ranking
+
+Results from all three methods are merged, deduplicated, and scored. Each candidate file receives a weighted score based on how it was retrieved and the strength of its match.
+
+The default weights are:
+
+| Method | Default weight |
+|--------|---------------|
+| Structural | 1.0 |
+| Semantic | 0.7 |
+| Keyword | 0.3 |
+
+Within structural results, the score is further refined by relationship type:
+
+| Relationship | Score multiplier |
+|-------------|-----------------|
+| Direct import | 1.0 |
+| Reverse import | 0.8 |
+| Co-change | Correlation score (0.0–1.0) |
+| Symbol reference | 0.6 |
+
+Weights are configurable in `.snif.json` under the `retrieval` key.
+
+```json
+{
+  "retrieval": {
+    "structural": 1.0,
+    "semantic": 0.7,
+    "keyword": 0.3
+  }
+}
+```
+
+## Budget enforcement
+
+Context must fit within a deterministic token budget. The selection order is fixed:
+
+<Steps>
+  <Step title="Diff">
+    The diff is always included in full.
+  </Step>
+  <Step title="Changed files">
+    The full contents of every changed file are included next.
+  </Step>
+  <Step title="Related files">
+    Related files from the retrieval layer are added in ranked order until the token limit is reached.
+  </Step>
+</Steps>
+
+When the budget is exhausted, remaining candidates are recorded as omissions in the run metadata. This makes the decision observable — you can inspect which files were excluded and why the budget was reached.
+
+<Note>
+  The context budget is configured in `.snif.json`. A small, focused repository can afford a generous budget. A large monorepo may need a tighter limit to keep review times predictable.
+</Note>
+
+## Why this matters
+
+The difference between a model with full related context and a model with only the diff is the difference between specific, evidenced findings and generic observations.
+
+With full context, Snif can make findings like:
+
+> `UserService.create` doesn't validate the `email` field, but `validate_email` in `validators.rs` (imported by the four other services that handle user input) is not called here.
+
+Without context, the same model can only observe:
+
+> Input validation may be missing.
+
+The first finding is actionable. The second is noise.
